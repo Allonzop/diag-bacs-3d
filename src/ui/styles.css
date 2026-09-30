@@ -640,6 +640,17 @@ label.ligne {
     float: right;
   }
 }
+.mobile-seulement {
+  display: none;
+}
+@media (max-width: 899px) {
+  .mobile-seulement {
+    display: inline-flex;
+  }
+  .bureau-seulement {
+    display: none;
+  }
+}
 kbd {
   font-family: var(--police-texte);
   font-size: 11px;

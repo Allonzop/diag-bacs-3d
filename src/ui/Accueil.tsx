@@ -125,6 +125,8 @@ export function Accueil() {
         </div>
         <p className="discret-texte" style={{ marginTop: 24 }}>
           Les projets sont stockés dans ce navigateur. Exportez un .zip régulièrement : c'est la seule sauvegarde.
+          <br />
+          Diag BACS 3D v{__VERSION_APP__} — Alter Watt.
         </p>
       </div>
     </div>

@@ -52,8 +52,17 @@ export interface EtatApp {
   supprimer: (id: Id) => Promise<void>;
   importerDepuisZip: (fichier: Blob) => Promise<void>;
   exporterVersZip: () => Promise<void>;
-  /** Modification immuable du projet courant, avec sauvegarde automatique. */
-  modifier: (fn: (p: Projet) => void) => void;
+  /**
+   * Modification immuable du projet courant, avec sauvegarde automatique.
+   * `historique: 'aucun'` n'empile pas de point d'annulation (mouvements continus d'un glisser) :
+   * appeler `marquerHistorique()` au début du geste.
+   */
+  modifier: (fn: (p: Projet) => void, options?: { historique?: 'normal' | 'aucun' }) => void;
+  /** Empile l'état courant comme point d'annulation. */
+  marquerHistorique: () => void;
+  annuler: () => void;
+  retablir: () => void;
+  historique: { passe: number; futur: number };
   ajouterFichier: (f: Omit<Fichier, 'projetId'>) => Promise<void>;
 
   setVue: (v: Vue) => void;
@@ -82,7 +91,15 @@ function planifierSauvegarde(p: Projet): void {
   }, 300);
 }
 
-/** Force l'écriture immédiate (fermeture, export). */
+if (typeof window !== 'undefined') {
+  const vider = () => void viderSauvegarde();
+  window.addEventListener('pagehide', vider);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') vider();
+  });
+}
+
+/** Force l'écriture immédiate (fermeture, export, mise en arrière-plan). */
 export async function viderSauvegarde(): Promise<void> {
   if (minuterieSauvegarde) {
     clearTimeout(minuterieSauvegarde);
@@ -106,6 +123,15 @@ function telecharger(blob: Blob, nom: string): void {
 
 let minuterieMessage: ReturnType<typeof setTimeout> | null = null;
 
+const TAILLE_HISTORIQUE = 60;
+let pilePasse: Projet[] = [];
+let pileFutur: Projet[] = [];
+
+function viderHistorique(): void {
+  pilePasse = [];
+  pileFutur = [];
+}
+
 export const useApp = create<EtatApp>()((set, get) => ({
   projet: null,
   projets: [],
@@ -120,6 +146,7 @@ export const useApp = create<EtatApp>()((set, get) => ({
   panneauOuvert: false,
   message: null,
   enLigne: typeof navigator === 'undefined' ? true : navigator.onLine,
+  historique: { passe: 0, futur: 0 },
 
   rafraichirListe: async () => {
     set({ projets: await listerProjets() });
@@ -134,7 +161,9 @@ export const useApp = create<EtatApp>()((set, get) => ({
       return;
     }
     const premierNiveau = [...p.niveaux].sort((a, b) => a.ordre - b.ordre)[0];
+    viderHistorique();
     set({
+      historique: { passe: 0, futur: 0 },
       projet: p,
       chargement: false,
       vue: '2d',
@@ -149,7 +178,8 @@ export const useApp = create<EtatApp>()((set, get) => ({
 
   fermerProjet: () => {
     void viderSauvegarde().then(() => get().rafraichirListe());
-    set({ projet: null, selection: null, niveauCourantId: null });
+    viderHistorique();
+    set({ projet: null, selection: null, niveauCourantId: null, historique: { passe: 0, futur: 0 } });
   },
 
   nouveauProjet: async (o) => {
@@ -185,6 +215,11 @@ export const useApp = create<EtatApp>()((set, get) => ({
     set({ chargement: true });
     try {
       const lu = await importerZip(fichier);
+      const existant = await chargerProjet(lu.projet.id);
+      if (existant && !window.confirm(`Le projet « ${existant.nom} » (${existant.reference}) existe déjà sur cet appareil. Le remplacer par le contenu du .zip ?`)) {
+        set({ chargement: false });
+        return;
+      }
       await enregistrerProjet(lu.projet);
       for (const f of lu.fichiers) await enregistrerFichier(f);
       await get().ouvrirProjet(lu.projet.id);
@@ -209,14 +244,42 @@ export const useApp = create<EtatApp>()((set, get) => ({
     get().afficher('Sauvegarde .zip téléchargée.', 'succes');
   },
 
-  modifier: (fn) => {
+  modifier: (fn, options) => {
     const courant = get().projet;
     if (!courant) return;
+    if (options?.historique !== 'aucun') get().marquerHistorique();
     const copie = structuredClone(courant);
     fn(copie);
     copie.dateModification = new Date().toISOString();
     set({ projet: copie });
     planifierSauvegarde(copie);
+  },
+
+  marquerHistorique: () => {
+    const courant = get().projet;
+    if (!courant) return;
+    pilePasse.push(courant);
+    if (pilePasse.length > TAILLE_HISTORIQUE) pilePasse.shift();
+    pileFutur = [];
+    set({ historique: { passe: pilePasse.length, futur: 0 } });
+  },
+
+  annuler: () => {
+    const courant = get().projet;
+    const precedent = pilePasse.pop();
+    if (!courant || !precedent) return;
+    pileFutur.push(courant);
+    set({ projet: precedent, historique: { passe: pilePasse.length, futur: pileFutur.length } });
+    planifierSauvegarde(precedent);
+  },
+
+  retablir: () => {
+    const courant = get().projet;
+    const suivant = pileFutur.pop();
+    if (!courant || !suivant) return;
+    pilePasse.push(courant);
+    set({ projet: suivant, historique: { passe: pilePasse.length, futur: pileFutur.length } });
+    planifierSauvegarde(suivant);
   },
 
   ajouterFichier: async (f) => {

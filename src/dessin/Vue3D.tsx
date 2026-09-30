@@ -1,7 +1,8 @@
-import { Edges, Line, OrbitControls, Text } from '@react-three/drei';
+import { OrbitControls, Text } from '@react-three/drei';
 import { Canvas, type ThreeEvent } from '@react-three/fiber';
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import policeOpenSans from '@fontsource/open-sans/files/open-sans-latin-600-normal.woff?url';
 import { useApp } from '../etat/store';
 import { centroidePolygone, surfacePolygone } from '../metres/geometrie';
@@ -15,6 +16,7 @@ const BLEU_CLAIR = '#EAF0F9';
 const JAUNE = '#FFC40B';
 /** Teintes de niveaux, dérivées du bleu charte (transparence), pour distinguer les étages. */
 const TEINTES_NIVEAUX = ['#3a4a8a', '#5c6fb0', '#8395c9', '#a9b6dc', '#2e3b73', '#4d5c9c'];
+const TYPES_BOITE = new Set<Equipement['type']>(['boitier', 'gtb', 'tableau']);
 
 /** Repère : x = x plan, y = altitude, z = y plan. */
 function versThree(x: number, altitude: number, y: number): [number, number, number] {
@@ -32,6 +34,7 @@ export function Vue3D() {
 
   const niveaux = niveauxTries(projet);
   const visibles = niveaux.filter((n) => !masques.includes(n.id));
+  const niveauxParId = useMemo(() => new Map(projet.niveaux.map((n) => [n.id, n])), [projet.niveaux]);
 
   const centre = useMemo(() => {
     const pts = projet.locaux.flatMap((l) => l.polygone);
@@ -43,6 +46,11 @@ export function Vue3D() {
     return { x: (minX + maxX) / 2, y: (minY + maxY) / 2, rayon: Math.max(maxX - minX, maxY - minY, 10) };
   }, [projet.locaux]);
   const altitudeMax = Math.max(...niveaux.map((n) => n.altitudePlancher + n.hauteurSousPlafond), 3);
+
+  const equipementsVisibles = useMemo(
+    () => projet.equipements.filter((e) => e.position && e.niveauId && !masques.includes(e.niveauId) && niveauxParId.has(e.niveauId)),
+    [projet.equipements, masques, niveauxParId],
+  );
 
   const exporterPng = async () => {
     const canvas = conteneur.current?.querySelector('canvas');
@@ -57,8 +65,8 @@ export function Vue3D() {
   return (
     <div ref={conteneur} className="vue3d" style={{ position: 'relative' }}>
       <Canvas
-        gl={{ preserveDrawingBuffer: true, antialias: true }}
-        dpr={[1, 2]}
+        gl={{ preserveDrawingBuffer: true, antialias: true, powerPreference: 'high-performance' }}
+        dpr={[1, 1.5]}
         camera={{ position: [centre.x + centre.rayon * 0.9, altitudeMax + centre.rayon * 0.8, centre.y + centre.rayon * 1.1], fov: 45, near: 0.1, far: 2000 }}
         onPointerMissed={() => selectionner(null)}
       >
@@ -72,31 +80,8 @@ export function Vue3D() {
           <NiveauMesh key={n.id} niveau={n} projet={projet} teinte={TEINTES_NIVEAUX[i % TEINTES_NIVEAUX.length]!} selectionId={selection?.genre === 'local' ? selection.id : null} />
         ))}
 
-        {projet.equipements.map((e) => {
-          if (!e.position || !e.niveauId || masques.includes(e.niveauId)) return null;
-          const n = projet.niveaux.find((q) => q.id === e.niveauId);
-          if (!n) return null;
-          return <EquipementMesh key={e.id} equipement={e} niveau={n} selectionne={selection?.genre === 'equipement' && selection.id === e.id} />;
-        })}
-
-        {projet.equipements.map((e) => {
-          if (!e.position || !e.lieA || !e.niveauId || masques.includes(e.niveauId)) return null;
-          const cible = projet.equipements.find((q) => q.id === e.lieA);
-          if (!cible?.position || !cible.niveauId || masques.includes(cible.niveauId)) return null;
-          const na = projet.niveaux.find((q) => q.id === e.niveauId)!;
-          const nb = projet.niveaux.find((q) => q.id === cible.niveauId)!;
-          return (
-            <Line
-              key={`liaison-${e.id}`}
-              points={[versThree(e.position.x, na.altitudePlancher + e.position.z, e.position.y), versThree(cible.position.x, nb.altitudePlancher + cible.position.z, cible.position.y)]}
-              color="#2980B9"
-              lineWidth={1.5}
-              dashed
-              dashSize={0.4}
-              gapSize={0.25}
-            />
-          );
-        })}
+        <Equipements equipements={equipementsVisibles} niveaux={niveauxParId} selectionId={selection?.genre === 'equipement' ? selection.id : null} />
+        <Liaisons projet={projet} equipements={equipementsVisibles} niveaux={niveauxParId} masques={masques} />
 
         <OrbitControls
           makeDefault
@@ -128,33 +113,55 @@ export function Vue3D() {
             Un doigt : orbite · deux doigts : zoom et déplacement · toucher un objet : fiche
           </span>
           <button onClick={() => void exporterPng()}>⤓ PNG</button>
+          <button className="mobile-seulement" onClick={() => useApp.getState().setPanneauOuvert(true)} title="Panneau">
+            ☷ Panneau
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
+function geometrieLocal(local: Local, niveau: Niveau): THREE.ExtrudeGeometry {
+  const forme = new THREE.Shape(local.polygone.map((p) => new THREE.Vector2(p.x, p.y)));
+  const g = new THREE.ExtrudeGeometry(forme, { depth: niveau.hauteurSousPlafond, bevelEnabled: false });
+  // La forme est dans le plan XY ; on la couche sur XZ, l'extrusion (z) devient la hauteur (y).
+  g.rotateX(Math.PI / 2);
+  g.translate(0, niveau.altitudePlancher + niveau.hauteurSousPlafond, 0);
+  return g;
+}
+
+/** Un niveau : un maillage par local (sélection au toucher) et une seule géométrie d'arêtes pour tout le niveau. */
 function NiveauMesh({ niveau, projet, teinte, selectionId }: { niveau: Niveau; projet: Projet; teinte: string; selectionId: string | null }) {
-  const locaux = projet.locaux.filter((l) => l.niveauId === niveau.id && l.polygone.length >= 3);
+  const locaux = useMemo(() => projet.locaux.filter((l) => l.niveauId === niveau.id && l.polygone.length >= 3), [projet.locaux, niveau.id]);
+  const geometries = useMemo(() => new Map(locaux.map((l) => [l.id, geometrieLocal(l, niveau)])), [locaux, niveau]);
+  const aretes = useMemo(() => {
+    const parties = [...geometries.values()].map((g) => new THREE.EdgesGeometry(g, 15));
+    const fusion = parties.length ? mergeGeometries(parties) : null;
+    parties.forEach((p) => p.dispose());
+    return fusion;
+  }, [geometries]);
+  useEffect(() => () => {
+    geometries.forEach((g) => g.dispose());
+    aretes?.dispose();
+  }, [geometries, aretes]);
+
   return (
     <group>
       {locaux.map((l) => (
-        <LocalMesh key={l.id} local={l} niveau={niveau} teinte={teinte} selectionne={selectionId === l.id} />
+        <LocalMesh key={l.id} local={l} niveau={niveau} geometrie={geometries.get(l.id)!} teinte={teinte} selectionne={selectionId === l.id} />
       ))}
+      {aretes && (
+        <lineSegments geometry={aretes}>
+          <lineBasicMaterial color={BLEU_FONCE} />
+        </lineSegments>
+      )}
     </group>
   );
 }
 
-function LocalMesh({ local, niveau, teinte, selectionne }: { local: Local; niveau: Niveau; teinte: string; selectionne: boolean }) {
+function LocalMesh({ local, niveau, geometrie, teinte, selectionne }: { local: Local; niveau: Niveau; geometrie: THREE.BufferGeometry; teinte: string; selectionne: boolean }) {
   const selectionner = useApp((s) => s.selectionner);
-  const geometrie = useMemo(() => {
-    const forme = new THREE.Shape(local.polygone.map((p) => new THREE.Vector2(p.x, p.y)));
-    const g = new THREE.ExtrudeGeometry(forme, { depth: niveau.hauteurSousPlafond, bevelEnabled: false });
-    // La forme est dans le plan XY ; on la couche sur XZ, l'extrusion (z) devient la hauteur (y).
-    g.rotateX(Math.PI / 2);
-    g.translate(0, niveau.altitudePlancher + niveau.hauteurSousPlafond, 0);
-    return g;
-  }, [local.polygone, niveau.hauteurSousPlafond, niveau.altitudePlancher]);
   const c = centroidePolygone(local.polygone);
   const surClic = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
@@ -163,8 +170,7 @@ function LocalMesh({ local, niveau, teinte, selectionne }: { local: Local; nivea
   return (
     <group>
       <mesh geometry={geometrie} onClick={surClic}>
-        <meshStandardMaterial color={selectionne ? JAUNE : teinte} transparent opacity={selectionne ? 0.55 : 0.3} depthWrite={false} side={THREE.DoubleSide} />
-        <Edges color={BLEU_FONCE} threshold={15} />
+        <meshStandardMaterial color={selectionne ? JAUNE : teinte} transparent opacity={selectionne ? 0.55 : 0.3} depthWrite={false} />
       </mesh>
       <Text
         position={[c.x, niveau.altitudePlancher + 0.05, c.y]}
@@ -181,37 +187,113 @@ function LocalMesh({ local, niveau, teinte, selectionne }: { local: Local; nivea
   );
 }
 
-function EquipementMesh({ equipement: e, niveau, selectionne }: { equipement: Equipement; niveau: Niveau; selectionne: boolean }) {
+/**
+ * Tous les équipements en deux maillages instanciés (sphères et boîtes) : un appel de dessin chacun,
+ * quel que soit le nombre d'équipements. Une sphère invisible plus large sert de cible tactile.
+ */
+function Equipements({ equipements, niveaux, selectionId }: { equipements: Equipement[]; niveaux: Map<string, Niveau>; selectionId: string | null }) {
   const selectionner = useApp((s) => s.selectionner);
-  const pos = e.position!;
-  const style = STYLE_TYPES[e.type];
-  const p = versThree(pos.x, niveau.altitudePlancher + pos.z, pos.y);
+  const spheres = useMemo(() => equipements.filter((e) => !TYPES_BOITE.has(e.type)), [equipements]);
+  const boites = useMemo(() => equipements.filter((e) => TYPES_BOITE.has(e.type)), [equipements]);
+  const selectionne = selectionId ? equipements.find((e) => e.id === selectionId) : undefined;
+  const nivSel = selectionne?.niveauId ? niveaux.get(selectionne.niveauId) : undefined;
+
   return (
-    <group position={p}>
-      <mesh
-        onClick={(ev) => {
-          ev.stopPropagation();
-          selectionner({ genre: 'equipement', id: e.id });
-        }}
-      >
-        {e.type === 'boitier' || e.type === 'gtb' || e.type === 'tableau' ? <boxGeometry args={[0.5, 0.5, 0.5]} /> : <sphereGeometry args={[0.3, 20, 16]} />}
-        <meshStandardMaterial color={style.couleur} emissive={selectionne ? JAUNE : '#000000'} emissiveIntensity={selectionne ? 0.6 : 0} />
-      </mesh>
-      {/* Cible tactile élargie, invisible. */}
-      <mesh
-        onClick={(ev) => {
-          ev.stopPropagation();
-          selectionner({ genre: 'equipement', id: e.id });
-        }}
-      >
-        <sphereGeometry args={[0.7, 8, 8]} />
-        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
-      </mesh>
-      {selectionne && (
-        <Text position={[0, 0.7, 0]} fontSize={0.45} color={BLEU_FONCE} font={policeOpenSans} anchorX="center" anchorY="bottom" outlineWidth={0.03} outlineColor="#ffffff">
-          {e.nom}
-        </Text>
+    <group>
+      <Instances liste={spheres} niveaux={niveaux} forme="sphere" rayon={0.3} onSelection={(id) => selectionner({ genre: 'equipement', id })} />
+      <Instances liste={boites} niveaux={niveaux} forme="boite" rayon={0.5} onSelection={(id) => selectionner({ genre: 'equipement', id })} />
+      <Instances liste={equipements} niveaux={niveaux} forme="cible" rayon={0.7} onSelection={(id) => selectionner({ genre: 'equipement', id })} />
+      {selectionne?.position && nivSel && (
+        <group position={versThree(selectionne.position.x, nivSel.altitudePlancher + selectionne.position.z, selectionne.position.y)}>
+          <mesh>
+            <sphereGeometry args={[TYPES_BOITE.has(selectionne.type) ? 0.5 : 0.42, 20, 16]} />
+            <meshBasicMaterial color={JAUNE} transparent opacity={0.55} depthWrite={false} />
+          </mesh>
+          <Text position={[0, 0.7, 0]} fontSize={0.45} color={BLEU_FONCE} font={policeOpenSans} anchorX="center" anchorY="bottom" outlineWidth={0.03} outlineColor="#ffffff">
+            {selectionne.nom}
+          </Text>
+        </group>
       )}
     </group>
+  );
+}
+
+function Instances({
+  liste,
+  niveaux,
+  forme,
+  rayon,
+  onSelection,
+}: {
+  liste: Equipement[];
+  niveaux: Map<string, Niveau>;
+  forme: 'sphere' | 'boite' | 'cible';
+  rayon: number;
+  onSelection: (id: string) => void;
+}) {
+  const ref = useRef<THREE.InstancedMesh>(null);
+  useEffect(() => {
+    const m = ref.current;
+    if (!m) return;
+    const matrice = new THREE.Matrix4();
+    const couleur = new THREE.Color();
+    liste.forEach((e, i) => {
+      const n = niveaux.get(e.niveauId!)!;
+      matrice.makeTranslation(e.position!.x, n.altitudePlancher + e.position!.z, e.position!.y);
+      m.setMatrixAt(i, matrice);
+      if (forme !== 'cible') m.setColorAt(i, couleur.set(STYLE_TYPES[e.type].couleur));
+    });
+    m.count = liste.length;
+    m.instanceMatrix.needsUpdate = true;
+    if (m.instanceColor) m.instanceColor.needsUpdate = true;
+    m.computeBoundingSphere();
+  }, [liste, niveaux, forme]);
+  if (liste.length === 0) return null;
+  return (
+    <instancedMesh
+      key={liste.length}
+      ref={ref}
+      args={[undefined, undefined, liste.length]}
+      frustumCulled={false}
+      onClick={(ev) => {
+        ev.stopPropagation();
+        const e = ev.instanceId !== undefined ? liste[ev.instanceId] : undefined;
+        if (e) onSelection(e.id);
+      }}
+    >
+      {forme === 'boite' ? <boxGeometry args={[rayon, rayon, rayon]} /> : <sphereGeometry args={[rayon, forme === 'cible' ? 8 : 20, forme === 'cible' ? 8 : 16]} />}
+      {forme === 'cible' ? <meshBasicMaterial transparent opacity={0} depthWrite={false} /> : <meshStandardMaterial />}
+    </instancedMesh>
+  );
+}
+
+/** Toutes les liaisons visibles dans une seule géométrie de segments pointillés. */
+function Liaisons({ projet, equipements, niveaux, masques }: { projet: Projet; equipements: Equipement[]; niveaux: Map<string, Niveau>; masques: string[] }) {
+  const geometrie = useMemo(() => {
+    const parId = new Map(projet.equipements.map((e) => [e.id, e]));
+    const points: number[] = [];
+    for (const e of equipements) {
+      if (!e.lieA) continue;
+      const cible = parId.get(e.lieA);
+      if (!cible?.position || !cible.niveauId || masques.includes(cible.niveauId)) continue;
+      const na = niveaux.get(e.niveauId!);
+      const nb = niveaux.get(cible.niveauId);
+      if (!na || !nb) continue;
+      points.push(e.position!.x, na.altitudePlancher + e.position!.z, e.position!.y, cible.position.x, nb.altitudePlancher + cible.position.z, cible.position.y);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+    return g;
+  }, [projet.equipements, equipements, niveaux, masques]);
+  const ref = useRef<THREE.LineSegments>(null);
+  useEffect(() => {
+    ref.current?.computeLineDistances();
+    return () => geometrie.dispose();
+  }, [geometrie]);
+  if (geometrie.getAttribute('position').count === 0) return null;
+  return (
+    <lineSegments ref={ref} geometry={geometrie}>
+      <lineDashedMaterial color="#2980B9" dashSize={0.4} gapSize={0.25} />
+    </lineSegments>
   );
 }

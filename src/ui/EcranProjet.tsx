@@ -55,11 +55,11 @@ export function EcranProjet() {
             </button>
           ))}
         </nav>
-        <button onClick={() => void exporter()} title="Exporter une sauvegarde .zip">
+        <button className="bureau-seulement" onClick={() => void exporter()} title="Exporter une sauvegarde .zip">
           ⤓ <span className="libelle">.zip</span>
         </button>
         {avecPanneau && (
-          <button className="icone" onClick={() => setPanneauOuvert(!panneauOuvert)} aria-label="Panneau" title="Panneau">
+          <button className="icone bureau-seulement" onClick={() => setPanneauOuvert(!panneauOuvert)} aria-label="Panneau" title="Panneau">
             ☷
           </button>
         )}

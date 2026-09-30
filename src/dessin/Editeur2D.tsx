@@ -46,6 +46,11 @@ export function Editeur2D() {
   const setTypeOutil = useApp((s) => s.setTypeEquipementOutil);
   const setNiveauCourant = useApp((s) => s.setNiveauCourant);
   const afficher = useApp((s) => s.afficher);
+  const marquerHistorique = useApp((s) => s.marquerHistorique);
+  const annuler = useApp((s) => s.annuler);
+  const retablir = useApp((s) => s.retablir);
+  const historique = useApp((s) => s.historique);
+  const setPanneauOuvert = useApp((s) => s.setPanneauOuvert);
 
   const niveau = niveauDe(projet, niveauId);
   const [conteneurRef, taille] = useTailleElement<HTMLDivElement>();
@@ -218,6 +223,17 @@ export function Editeur2D() {
       const cible = e.target as HTMLElement | null;
       if (cible && (cible.tagName === 'INPUT' || cible.tagName === 'TEXTAREA' || cible.tagName === 'SELECT' || cible.isContentEditable)) return;
       const t = e.key.toUpperCase();
+      if ((e.ctrlKey || e.metaKey) && t === 'Z') {
+        e.preventDefault();
+        if (e.shiftKey) retablir();
+        else annuler();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && t === 'Y') {
+        e.preventDefault();
+        retablir();
+        return;
+      }
       const o = OUTILS.find((x) => x.touche === t);
       if (o && !e.metaKey && !e.ctrlKey) {
         setOutil(o.id);
@@ -305,6 +321,9 @@ export function Editeur2D() {
       if (Math.hypot(ecran.x - g.depart.x, ecran.y - g.depart.y) < SEUIL_GLISSER_PX) return;
       const departMonde = ecranVersMonde(vueRef.current, largeur, hauteur, g.depart.x, g.depart.y);
       // Début d'un glisser : on décide du geste selon l'outil et la cible.
+      if (outil === 'selection' && (g.cible?.genre === 'equipement' || g.cible?.genre === 'sommet' || (g.cible?.genre === 'local' && selection?.genre === 'local' && selection.id === g.cible.id))) {
+        marquerHistorique();
+      }
       if (outil === 'selection' && g.cible?.genre === 'equipement') {
         const idEq = g.cible.id;
         const eq = projet.equipements.find((q) => q.id === idEq);
@@ -332,25 +351,34 @@ export function Editeur2D() {
       setApercuRectangle({ a: g.depart, b: g.courant });
     } else if (g.genre === 'equipement') {
       const cible = { x: arrondirGrille(monde.x + g.decalage.x, 0.1), y: arrondirGrille(monde.y + g.decalage.y, 0.1) };
-      modifier((p) => {
-        const eq = p.equipements.find((q) => q.id === g.id);
-        if (!eq?.position) return;
-        eq.position = { ...eq.position, ...cible };
-        eq.localId = localContenant(cible, p.locaux.filter((l) => l.niveauId === eq.niveauId))?.id ?? null;
-      });
+      modifier(
+        (p) => {
+          const eq = p.equipements.find((q) => q.id === g.id);
+          if (!eq?.position) return;
+          eq.position = { ...eq.position, ...cible };
+          eq.localId = localContenant(cible, p.locaux.filter((l) => l.niveauId === eq.niveauId))?.id ?? null;
+        },
+        { historique: 'aucun' },
+      );
     } else if (g.genre === 'sommet') {
       const cible = aimanterIci(monde, { localId: g.localId, index: g.index });
-      modifier((p) => {
-        const l = p.locaux.find((q) => q.id === g.localId);
-        if (l && l.polygone[g.index]) l.polygone[g.index] = cible;
-      });
+      modifier(
+        (p) => {
+          const l = p.locaux.find((q) => q.id === g.localId);
+          if (l && l.polygone[g.index]) l.polygone[g.index] = cible;
+        },
+        { historique: 'aucun' },
+      );
     } else if (g.genre === 'local') {
       const dx = arrondirGrille(monde.x - g.depart.x, PAS_GRILLE);
       const dy = arrondirGrille(monde.y - g.depart.y, PAS_GRILLE);
-      modifier((p) => {
-        const l = p.locaux.find((q) => q.id === g.localId);
-        if (l) l.polygone = g.polygoneDepart.map((s) => ({ x: s.x + dx, y: s.y + dy }));
-      });
+      modifier(
+        (p) => {
+          const l = p.locaux.find((q) => q.id === g.localId);
+          if (l) l.polygone = g.polygoneDepart.map((s) => ({ x: s.x + dx, y: s.y + dy }));
+        },
+        { historique: 'aucun' },
+      );
     }
   };
 
@@ -460,6 +488,9 @@ export function Editeur2D() {
   const exporterPng = async () => {
     if (!svgRef.current || !niveau) return;
     try {
+      // Le niveau entier est cadré avant la capture, pour un PNG indépendant du zoom courant.
+      recadrer();
+      await new Promise((r) => setTimeout(r, 80));
       const blob = await svgEnPng(svgRef.current, largeur, hauteur);
       telechargerBlob(blob, `plan_${projet.reference}_${niveau.nom.replace(/[^\w-]+/g, '_')}.png`);
     } catch (err) {
@@ -668,6 +699,12 @@ export function Editeur2D() {
           )}
         </div>
         <div className="groupe">
+          <button className="icone" onClick={annuler} disabled={historique.passe === 0} aria-label="Annuler" title="Annuler (Ctrl+Z)">
+            ↶
+          </button>
+          <button className="icone" onClick={retablir} disabled={historique.futur === 0} aria-label="Rétablir" title="Rétablir (Ctrl+Maj+Z)">
+            ↷
+          </button>
           {selection && (selection.genre === 'local' || selection.genre === 'equipement') && (
             <button className="danger" onClick={supprimerSelection} title="Supprimer la sélection (Suppr)">
               Supprimer
@@ -684,6 +721,9 @@ export function Editeur2D() {
           </button>
           <button onClick={() => void exporterPng()} title="Exporter le plan en PNG">
             ⤓ PNG
+          </button>
+          <button className="mobile-seulement" onClick={() => setPanneauOuvert(true)} title="Panneau">
+            ☷ Panneau
           </button>
         </div>
       </div>

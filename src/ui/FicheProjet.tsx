@@ -5,6 +5,7 @@ import { referentielMetres, referentielPoints, referentielZonesClimatiques, vers
 export function FicheProjet() {
   const projet = useApp((s) => s.projet)!;
   const modifier = useApp((s) => s.modifier);
+  const exporter = useApp((s) => s.exporterVersZip);
   const courantes = versionsReferentiels();
   const perimes = Object.entries(courantes).filter(([k, v]) => projet.versionsReferentiels[k] && projet.versionsReferentiels[k] !== v);
 
@@ -12,6 +13,16 @@ export function FicheProjet() {
     <div className="page">
       <div className="contenu" style={{ maxWidth: 720 }}>
         <h1>Projet</h1>
+        <div className="carte">
+          <div className="actions">
+            <button className="principal" onClick={() => void exporter()}>
+              ⤓ Exporter une sauvegarde .zip
+            </button>
+            <span className="discret-texte">
+              {projet.dernierExport ? `Dernier export le ${new Date(projet.dernierExport).toLocaleString('fr-FR')}` : 'Jamais exporté'}
+            </span>
+          </div>
+        </div>
         <div className="carte">
           <label className="champ">
             <span>Référence dossier</span>
