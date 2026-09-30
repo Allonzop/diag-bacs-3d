@@ -1,0 +1,36 @@
+{
+  "version": "0.1.0",
+  "date": "2026-09-30",
+  "source": "Outil Diag V3.5, onglet « Comptage de point ». Extrait PARTIEL : seules les quatre valeurs citées dans le PRD §7.3 sont reprises. Les autres types restent à compléter depuis l'onglet (voir QUESTIONS.md).",
+  "description": "Nombre de points câblés par type d'appareil. Une règle s'applique à un type d'équipement, avec au besoin une condition sur un attribut. La première règle qui correspond l'emporte. Un équipement sans règle compte 0 point et est signalé « non référencé ».",
+  "regles": [
+    {
+      "id": "depart-hydraulique",
+      "libelle": "Départ hydraulique",
+      "type": "distribution",
+      "condition": null,
+      "points": 10
+    },
+    {
+      "id": "chaudiere",
+      "libelle": "Chaudière",
+      "type": "generation",
+      "condition": { "attribut": "type", "valeur": "chaudiere" },
+      "points": 10
+    },
+    {
+      "id": "cta-simple-flux",
+      "libelle": "CTA simple flux",
+      "type": "cta",
+      "condition": { "attribut": "flux", "valeur": "simple" },
+      "points": 20
+    },
+    {
+      "id": "cta-double-flux",
+      "libelle": "CTA double flux",
+      "type": "cta",
+      "condition": { "attribut": "flux", "valeur": "double" },
+      "points": 40
+    }
+  ]
+}

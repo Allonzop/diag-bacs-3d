@@ -1,0 +1,11 @@
+{
+  "version": "0.1.0",
+  "date": "2026-09-30",
+  "source": "PRD §7.2 et §7.3",
+  "description": "Paramètres des métrés. Le seuil filaire/radio et le coefficient de cheminement ne sont écrits nulle part ailleurs.",
+  "seuilFilaireRadioM": 15,
+  "regleSeuil": "longueur estimée <= seuil → filaire, sinon → radio",
+  "coefficientCheminementDefaut": 1.2,
+  "grilleAimantationM": 0.5,
+  "hauteurPoseDefautM": 1.2
+}
