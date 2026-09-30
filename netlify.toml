@@ -4,6 +4,8 @@
 
 [build.environment]
   NODE_VERSION = "22"
+  # Les navigateurs Playwright ne servent qu'aux tests de bout en bout, pas au build.
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1"
 
 # Application monopage : toute route inconnue renvoie l'index.
 [[redirects]]

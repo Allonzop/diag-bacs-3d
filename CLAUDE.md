@@ -22,7 +22,10 @@ npm run verifier     # tsc strict + vitest  ← à passer avant tout commit
 npm run test:watch   # tests en continu
 npm run build        # build de production + service worker (dist/)
 npm run preview      # sert dist/ pour tester le mode hors ligne
+npm run test:e2e     # Playwright sur dist/ (après npm run build) : critères J1, téléphone, charge
 ```
+
+Bout en bout : `npx playwright install chromium` une fois (ou `CHROMIUM_PATH=/chemin/vers/chromium`). Les tests vivent dans `tests/e2e/*.spec.ts` et tournent sur `vite preview` (port 4173).
 
 ## Architecture (PRD §10)
 
@@ -40,7 +43,8 @@ src/
   referentiels/      Chargeur typé des JSON de referentiels/.
   ui/                Écrans et panneaux React. styles.css porte la charte.
   moteur/ rapport/ import-alter/   Vides jusqu'aux jalons J2–J4.
-tests/               vitest (node). Pas de test de rendu React ; le moteur et les métrés sont testés en pur.
+tests/               vitest (node) : moteur, métrés, schéma, stockage, historique. Pas de test de rendu React unitaire.
+tests/e2e/           Playwright sur le build : parcours J1, téléphone (Pixel 7), test de charge.
 local-data/          Données client, ignoré par git.
 ```
 
@@ -56,7 +60,9 @@ Le projet est un seul document JSON stocké à plat : `zones[]`, `niveaux[]`, `l
 
 ### Conventions
 
-- Le store expose `modifier(fn)` : clone structurel du projet, mutation dans `fn`, sauvegarde automatique différée (300 ms). Ne jamais muter `projet` directement.
+- Le store expose `modifier(fn)` : clone structurel du projet, mutation dans `fn`, sauvegarde automatique différée (300 ms, forcée sur `pagehide` / onglet masqué). Ne jamais muter `projet` directement.
+- Historique : chaque `modifier` empile un point d'annulation. Pour un geste continu (glisser), appeler `marquerHistorique()` au début puis `modifier(fn, { historique: 'aucun' })` à chaque mouvement.
+- 3D : les équipements sont des `InstancedMesh` (sphères, boîtes, cibles tactiles invisibles), les arêtes d'un niveau une seule `EdgesGeometry` fusionnée, les liaisons un seul `LineSegments` pointillé. Garder ce principe : un appel de dessin par famille, pas par objet.
 - Les fonctions de `metres/` et (plus tard) `moteur/` sont **pures et déterministes** : même projet + mêmes référentiels → même résultat. Test de non-régression sur le projet démo (`tests/metres-demo.test.ts`).
 - Cibles tactiles ≥ 44 px (`--cible`). Les gestes de l'éditeur 2D passent par les Pointer Events (souris, stylet, doigt) ; deux doigts = pincement.
 - Charte : Fraunces (titres), Open Sans (texte), `#07072D`, `#EAF0F9`, `#FFC40B` en accent seulement. Les couleurs par type d'équipement (`STYLE_TYPES`) codent la donnée et ne font pas partie de la charte.

@@ -1,6 +1,8 @@
 node_modules/
 dist/
 dev-dist/
+test-results/
+playwright-report/
 local-data/*
 !local-data/README.md
 *.log

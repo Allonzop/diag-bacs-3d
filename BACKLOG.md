@@ -17,7 +17,10 @@ Critère : projet démo dessiné, 3D navigable au toucher, métrés et seuil 15 
 - [x] Métrés : surfaces, périmètres, volumes, comptages, câbles (vol d'oiseau, estimée), seuil 15 m, points, export CSV/JSON, tests unitaires
 - [x] Référentiels `metres.json`, `points.json` (partiel), `zones_climatiques.json`
 - [x] Déploiement Netlify + CI GitHub Actions
-- [ ] Validation par Allonzo sur téléphone et iPad (gestes, lisibilité, performance)
+- [x] Annuler / rétablir (Ctrl+Z, Ctrl+Maj+Z, boutons), sauvegarde forcée en arrière-plan, confirmation avant d'écraser un projet à l'import
+- [x] Tests de bout en bout Playwright sur le build (critères J1, téléphone, charge 10 niveaux / 150 locaux / 500 équipements)
+- [x] 3D : équipements instanciés, arêtes fusionnées par niveau, liaisons en une géométrie
+- [ ] Validation par Allonzo sur téléphone et iPad (gestes, lisibilité, cadence 3D ≥ 30 i/s sur le projet de charge)
 - [ ] Compléter `points.json` depuis l'onglet « Comptage de point » (voir QUESTIONS.md Q8)
 - [ ] Vérifier `zones_climatiques.json` contre l'onglet « Listes_importrange » (Q9)
 
